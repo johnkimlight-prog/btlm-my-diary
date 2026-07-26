@@ -39,6 +39,46 @@ export default function AdminDashboardPage() {
     checkAdminAndFetchData();
   }, []);
 
+  // --- 새로 추가되는 데이터 패칭 헬퍼 함수 (1000개 제한 돌파) ---
+  const fetchAllMembers = async () => {
+    let allData: any[] = [];
+    let page = 0;
+    const pageSize = 1000;
+
+    while (true) {
+      const { data, error } = await supabase
+        .from("members")
+        .select("*")
+        .range(page * pageSize, (page + 1) * pageSize - 1);
+
+      if (error || !data || data.length === 0) break;
+      allData = [...allData, ...data];
+      if (data.length < pageSize) break; // 1000개 미만이면 마지막 페이지
+      page++;
+    }
+    return allData;
+  };
+
+  const fetchAllLogs = async () => {
+    let allData: any[] = [];
+    let page = 0;
+    const pageSize = 1000;
+
+    while (true) {
+      const { data, error } = await supabase
+        .from("activity_logs")
+        .select(`*, members(name, member_no, department, region)`)
+        .range(page * pageSize, (page + 1) * pageSize - 1);
+
+      if (error || !data || data.length === 0) break;
+      allData = [...allData, ...data];
+      if (data.length < pageSize) break;
+      page++;
+    }
+    return allData;
+  };
+
+  // --- 기존 함수 업데이트 ---
   const checkAdminAndFetchData = async () => {
     setLoading(true);
     
@@ -57,15 +97,16 @@ export default function AdminDashboardPage() {
       return;
     }
 
-    // 3. 관리자 통과 시: 전체 성도 데이터 및 전체 활동 기록 가져오기 (Supabase 조인 활용)
-    const [membersRes, logsRes] = await Promise.all([
-      supabase.from("members").select("*"),
-      // logs를 가져올 때 작성자의 소속 정보도 함께 조인해서 가져옵니다.
-      supabase.from("activity_logs").select(`*, members(name, member_no, department, region)`)
+    // 3. 커스텀 함수(fetchAll...)를 활용하여 6,000명 이상의 데이터를 모두 가져옵니다.
+    // Promise.all을 사용하여 두 가지 데이터를 동시에 병렬로 불러와 속도를 높입니다.
+    const [allMembersData, allLogsData] = await Promise.all([
+      fetchAllMembers(),
+      fetchAllLogs()
     ]);
 
-    if (membersRes.data) setAllMembers(membersRes.data);
-    if (logsRes.data) setAllLogs(logsRes.data);
+    // 4. 모두 모아진 데이터를 상태(State)에 저장합니다.
+    setAllMembers(allMembersData);
+    setAllLogs(allLogsData);
     
     setLoading(false);
   };
