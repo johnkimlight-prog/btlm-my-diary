@@ -373,7 +373,8 @@ export default function DashboardPage() {
         
         <div className="side-banner" style={{ width: 160, padding: '20px 10px', display: 'none', position: 'sticky', top: 0, height: '100vh' }}>
           <div style={{ width: '100%', height: 600, backgroundColor: '#e6fffb', borderRadius: 8, border: `1px dashed ${MINT_COLOR}`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', textAlign: 'center' }}>
-            <Text style={{ color: MINT_COLOR, fontWeight: 'bold' }}>좌측 긴 배너<br/>(160 x 600)</Text>
+            <img src="resources/left_banner.png" width="100%"/>
+            {/* <Text style={{ color: MINT_COLOR, fontWeight: 'bold' }}>좌측 긴 배너<br/>(160 x 600)</Text> */}
           </div>
         </div>
 
@@ -396,7 +397,7 @@ export default function DashboardPage() {
           `}} />
 
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-            <Title level={4} style={{ margin: 0, color: '#262626' }}>나의 전도 다이어리 📖</Title>
+            <Title level={4} style={{ margin: 0, color: '#262626' }}>전도 다이어리 📖</Title>
             <div style={{ display: 'flex', gap: '6px' }}>
               {member?.is_admin && <Button size="small" type="primary" danger onClick={() => router.push('/admin')}>관리자</Button>}
               <Button size="small" onClick={handleLogout}>로그아웃</Button>
@@ -417,7 +418,8 @@ export default function DashboardPage() {
           </div>
 
           <div style={{ width: '100%', minHeight: 60, backgroundColor: '#e6fffb', borderRadius: 8, marginBottom: 16, display: 'flex', alignItems: 'center', justifyContent: 'center', border: `1px dashed ${MINT_COLOR}` }}>
-            <Text style={{ color: MINT_COLOR, fontSize: '0.9rem' }}>상단 배너 공간</Text>
+            {/*<Text style={{ color: MINT_COLOR, fontSize: '0.9rem' }}>상단 배너 공간</Text>*/}
+            <img src="resources/top_banner.png" width="100%" height="100%"/>
           </div>
 
           <Card styles={{ body: { padding: '16px' } }} style={{ marginBottom: 16, borderRadius: 12, boxShadow: "0 2px 8px rgba(0,0,0,0.05)", border: `1px solid #e6fffb` }}>
