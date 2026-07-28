@@ -17,7 +17,6 @@ import {
 import dayjs from "dayjs";
 import 'dayjs/locale/ko';
 import weekOfYear from "dayjs/plugin/weekOfYear";
-// 💡 달력 등 Ant Design 컴포넌트 전면 한글화를 위한 로케일 임포트
 import koKR from 'antd/locale/ko_KR';
 
 dayjs.extend(weekOfYear);
@@ -53,7 +52,6 @@ export default function DashboardPage() {
   const [isEditMode, setIsEditMode] = useState(false);
   const [currentEditId, setCurrentEditId] = useState<string | null>(null);
 
-  // 💡 누적 내역 날짜 필터 상태 (기본값: 올해 1월 1일 ~ 현재)
   const [statsRange, setStatsRange] = useState<[dayjs.Dayjs, dayjs.Dayjs]>([dayjs().startOf('year'), dayjs()]);
 
   const [form] = Form.useForm();
@@ -199,23 +197,28 @@ export default function DashboardPage() {
     return `${m}분`;
   };
 
+  // 💡 달력 모바일 최적화: 도구 이름 숨기고 '1h', '30m' 시간만 작은 뱃지로 깔끔하게 표시
   const dateCellRender = (value: dayjs.Dayjs) => {
     const dateString = value.format("YYYY-MM-DD");
     const dayLogs = logs.filter(log => log.activity_date === dateString);
+    if (dayLogs.length === 0) return null;
+
     return (
-      <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
+      <ul style={{ listStyle: "none", padding: 0, margin: 0, textAlign: 'center' }}>
         {dayLogs.map((log, index) => {
           const durationHrs = getDurationHours(log.start_time, log.end_time);
-          const durationStr = durationHrs >= 1 ? `${Math.floor(durationHrs)}h` : `${Math.round(durationHrs * 60)}m`;
-          const resultCount = log.find_1_count + log.find_2_count;
-          const resultText = resultCount > 0 ? `${resultCount}명` : '없음';
+          let durationStr = "";
+          if (durationHrs >= 1) {
+            durationStr = Number.isInteger(durationHrs) ? `${durationHrs}h` : `${durationHrs.toFixed(1)}h`;
+          } else {
+            durationStr = `${Math.round(durationHrs * 60)}m`;
+          }
           
           return (
             <li key={index} style={{ marginBottom: 2 }}>
               <Badge 
                 color={MINT_COLOR} 
-                style={{ fontSize: '10px', whiteSpace: 'normal', display: 'flex', alignItems: 'flex-start', lineHeight: '1.2' }} 
-                text={<span><strong>{log.tool_used}</strong> ({durationStr}/{resultText})</span>} 
+                text={<span style={{ fontSize: '10px', fontWeight: 'bold' }}>{durationStr}</span>} 
               />
             </li>
           );
@@ -259,11 +262,9 @@ export default function DashboardPage() {
     return { weeklyChart, monthlyChart, yearlyChart };
   };
 
-  // 💡 평균 찾기 시간 연산 및 기간 필터 적용
   const calculateStats = () => {
     let totalMins = 0, totalFind1 = 0, totalFind2 = 0;
     
-    // 설정된 날짜 범위 내의 로그만 필터링
     const filteredLogs = logs.filter(log => {
       const logDate = dayjs(log.activity_date);
       return logDate.isAfter(statsRange[0].subtract(1, 'day')) && logDate.isBefore(statsRange[1].add(1, 'day'));
@@ -274,10 +275,6 @@ export default function DashboardPage() {
       totalFind1 += (log.find_1_count || 0);
       totalFind2 += (log.find_2_count || 0);
     });
-
-    const totalHoursFloat = totalMins / 60;
-    const find1PerHour = totalHoursFloat > 0 ? (totalFind1 / totalHoursFloat).toFixed(2) : "0.00";
-    const find2PerHour = totalHoursFloat > 0 ? (totalFind2 / totalHoursFloat).toFixed(2) : "0.00";
 
     const avgFind1Mins = totalFind1 > 0 ? Math.round(totalMins / totalFind1) : 0;
     const avgFind2Mins = totalFind2 > 0 ? Math.round(totalMins / totalFind2) : 0;
@@ -294,10 +291,9 @@ export default function DashboardPage() {
       weeklyFind2 += (log.find_2_count || 0);
     });
 
-    return { totalMins, totalFind1, totalFind2, avgFind1Mins, avgFind2Mins, weeklyMins, weeklyFind1, weeklyFind2, find1PerHour, find2PerHour };
+    return { totalMins, totalFind1, totalFind2, avgFind1Mins, avgFind2Mins, weeklyMins, weeklyFind1, weeklyFind2 };
   };
 
-  // 💡 소속 텍스트 자동 변환 함수 (0-0 또는 0구역)
   const getTeamSectorString = () => {
     const t = member?.team;
     const s = member?.sector;
@@ -365,13 +361,13 @@ export default function DashboardPage() {
     },
     { 
       key: "2", label: <><CalendarOutlined /> 달력</>, children: (
-        <div style={{ marginTop: 10, overflowX: 'auto' }}>
+        // 💡 좌우 스크롤 제거 (overflow 및 minWidth 삭제)
+        <div style={{ marginTop: 10 }}>
           <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 10 }}>
             <Button size="small" type="primary" onClick={() => setCalendarValue(dayjs())}>오늘로 이동</Button>
           </div>
-          <div style={{ minWidth: '400px' }}>
-            <Calendar value={calendarValue} onSelect={onCalendarSelect} cellRender={dateCellRender} />
-          </div>
+          {/* 달력 컴포넌트를 그냥 배치하면 CSS에 의해 모바일 폭에 딱 맞춰집니다 */}
+          <Calendar value={calendarValue} onSelect={onCalendarSelect} cellRender={dateCellRender} />
           <Text type="secondary" style={{ display: 'block', marginTop: 10, textAlign: 'center', fontSize: '0.85rem' }}>💡 날짜 칸을 터치하면 상세 내용을 봅니다.</Text>
         </div>
       ) 
@@ -379,7 +375,6 @@ export default function DashboardPage() {
   ];
 
   return (
-    // 💡 달력과 DatePicker 완벽 한글화를 위한 locale={koKR} 추가
     <ConfigProvider locale={koKR} theme={{ token: { fontSize: 15, colorText: '#262626', colorPrimary: MINT_COLOR } }}>
       <div style={{ display: 'flex', justifyContent: 'center', backgroundColor: '#f0f2f5', minHeight: '100vh' }}>
         
@@ -391,6 +386,7 @@ export default function DashboardPage() {
 
         <div style={{ width: '100%', maxWidth: 600, padding: '12px', display: 'flex', flexDirection: 'column' }}>
           
+          {/* 💡 달력 모바일 최적화를 위한 CSS 주입 (모드 전환 버튼 숨기기, 패딩 축소 등) */}
           <style dangerouslySetInnerHTML={{__html: `
             @keyframes bounceAndShineGold { 0%, 100% { transform: translateY(0) scale(1); text-shadow: 0 0 10px rgba(250, 219, 20, 0.5); } 50% { transform: translateY(-5px) scale(1.05); text-shadow: 0 0 20px rgba(250, 219, 20, 1), 0 0 10px rgba(255, 255, 255, 0.8); } }
             @keyframes shineSilver { 0%, 100% { transform: scale(1); text-shadow: 0 0 5px rgba(211, 211, 211, 0.5); } 50% { transform: scale(1.03); text-shadow: 0 0 15px rgba(211, 211, 211, 1), 0 0 10px rgba(255, 255, 255, 0.8); } }
@@ -398,6 +394,12 @@ export default function DashboardPage() {
             .flashy-medal-gold { animation: bounceAndShineGold 1.5s infinite ease-in-out; } .flashy-medal-silver { animation: shineSilver 2s infinite ease-in-out; } .flashy-medal-bronze { animation: shineBronze 2s infinite ease-in-out; }
             @media (min-width: 1000px) { .side-banner { display: flex !important; } }
             .compact-stats .ant-typography { margin-bottom: 2px !important; }
+            
+            /* 달력 모바일 반응형 강제 최적화 */
+            .ant-picker-calendar .ant-picker-cell-inner { padding: 4px 0 !important; min-width: 0 !important; }
+            .ant-picker-calendar-date-value { font-size: 0.85rem !important; }
+            .ant-picker-calendar-mode-switch { display: none !important; } /* 월/연간 전환 버튼 숨김 */
+            .ant-picker-calendar-header .ant-select { min-width: 70px !important; width: auto !important; margin-right: 4px; }
           `}} />
 
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
@@ -425,7 +427,6 @@ export default function DashboardPage() {
             <Text style={{ color: MINT_COLOR, fontSize: '0.9rem' }}>상단 배너 공간</Text>
           </div>
 
-          {/* 💡 워닝 해결: styles={{ body: {...} }} 형태 사용 */}
           <Card styles={{ body: { padding: '16px' } }} style={{ marginBottom: 16, borderRadius: 12, boxShadow: "0 2px 8px rgba(0,0,0,0.05)", border: `1px solid #e6fffb` }}>
             <div className="compact-stats">
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
@@ -435,7 +436,6 @@ export default function DashboardPage() {
                 </div>
               </div>
 
-              {/* 💡 누적 내역 날짜 필터 추가 */}
               <DatePicker.RangePicker 
                 value={statsRange} 
                 onChange={(dates) => { if(dates && dates[0] && dates[1]) setStatsRange([dates[0], dates[1]]) }}
@@ -448,9 +448,7 @@ export default function DashboardPage() {
               <Row gutter={[0, 4]}>
                 <Col span={24}><Text type="secondary" style={{ width: 100, display: 'inline-block' }}>총 활동 시간 :</Text> <Text strong>{formatMinsToString(stats.totalMins)}</Text></Col>
                 <Col span={24}><Text type="secondary" style={{ width: 100, display: 'inline-block' }}>총 찾기 수 :</Text> <Text strong>찾1 {stats.totalFind1}명, 찾2 {stats.totalFind2}명</Text></Col>
-                {/* 💡 시간당 찾기가 아닌 '평균 찾기 시간'으로 계산되어 표기됨 */}
-                <Col span={24}><Text type="secondary" style={{ width: 100, display: 'inline-block' }}>평균 찾기 시간 :</Text> <Text strong>찾1 1개 당 {stats.avgFind1Mins ? formatMinsToString(stats.avgFind1Mins) : '없음'}, 찾2 1개 당 {stats.avgFind2Mins ? formatMinsToString(stats.avgFind2Mins) : '없음'}</Text></Col>
-                <Col span={24}><Text type="secondary" style={{ width: 100, display: 'inline-block' }}>시간당 찾기 :</Text> <Text strong>찾1 {stats.find1PerHour}명, 찾2 {stats.find2PerHour}명</Text></Col>                
+                <Col span={24}><Text type="secondary" style={{ width: 100, display: 'inline-block' }}>평균 찾기 시간 :</Text> <Text strong>찾1 {stats.avgFind1Mins ? formatMinsToString(stats.avgFind1Mins) : '없음'}, 찾2 {stats.avgFind2Mins ? formatMinsToString(stats.avgFind2Mins) : '없음'}</Text></Col>
               </Row>
               
               <Divider style={{ margin: '12px 0' }} />
