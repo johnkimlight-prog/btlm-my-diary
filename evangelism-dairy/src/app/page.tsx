@@ -18,6 +18,7 @@ import dayjs from "dayjs";
 import 'dayjs/locale/ko';
 import weekOfYear from "dayjs/plugin/weekOfYear";
 import koKR from 'antd/locale/ko_KR';
+import { ACTIVITY_TOOLS, REGION_MAP } from "@/constants";
 
 dayjs.extend(weekOfYear);
 dayjs.locale('ko');
@@ -25,14 +26,6 @@ dayjs.locale('ko');
 const { Title, Text } = Typography;
 const { TextArea } = Input;
 
-const ACTIVITY_TOOLS = ["노방", "지인", "온라인", "기타"];
-const REGION_MAP: Record<string, string[]> = {
-  "장년부": ["장년 1지역", "장년 2지역", "장년 3지역"],
-  "부녀부": ["부녀 1지역", "부녀 2지역", "부녀 3지역"],
-  "청년부": ["대학부", "직장인부", "새내기부"],
-  "교역": ["본부", "지부", "센터"],
-  "미배정": ["-"]
-};
 const MINT_COLOR = "#13c2c2"; 
 
 export default function DashboardPage() {
