@@ -333,7 +333,7 @@ export default function DashboardPage() {
                 <CartesianGrid strokeDasharray="3 3" vertical={false} />
                 <XAxis dataKey="name" tick={{fontSize: 12}} />
                 <YAxis allowDecimals={true} tick={{fontSize: 12}} width={30} />
-                <Tooltip formatter={(val: number) => `${val}시간`} />
+                <Tooltip formatter={(val: any) => `${val}시간`} />
                 <Bar dataKey="시간" fill={MINT_COLOR} radius={[4, 4, 0, 0]} barSize={25}><LabelList content={renderCustomLabel} /></Bar>
               </BarChart>
             </ResponsiveContainer> 
@@ -344,7 +344,7 @@ export default function DashboardPage() {
                 <CartesianGrid strokeDasharray="3 3" vertical={false} />
                 <XAxis dataKey="name" tick={{fontSize: 12}} />
                 <YAxis tick={{fontSize: 12}} width={30} />
-                <Tooltip formatter={(val: number) => `${val}시간`} />
+                <Tooltip formatter={(val: any) => `${val}시간`} />
                 <Line type="monotone" dataKey="시간" stroke={MINT_COLOR} strokeWidth={3} activeDot={{ r: 6 }}><LabelList content={renderLineLabel} /></Line>
               </LineChart>
             </ResponsiveContainer> 
@@ -355,7 +355,7 @@ export default function DashboardPage() {
                 <CartesianGrid strokeDasharray="3 3" vertical={false} />
                 <XAxis dataKey="name" tick={{fontSize: 12}} />
                 <YAxis tick={{fontSize: 12}} width={30} />
-                <Tooltip formatter={(val: number) => `${val}시간`} />
+                <Tooltip formatter={(val: any) => `${val}시간`} />
                 <Bar dataKey="시간" fill={MINT_COLOR} radius={[4, 4, 0, 0]} barSize={20}><LabelList content={renderCustomLabel} /></Bar>
               </BarChart>
             </ResponsiveContainer> 
