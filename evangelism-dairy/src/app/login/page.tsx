@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { Card, Form, Input, Button, message, Typography } from "antd";
 import { LockOutlined, UserOutlined } from "@ant-design/icons";
+import { Color } from "antd/es/color-picker";
 
 const { Title } = Typography;
 
