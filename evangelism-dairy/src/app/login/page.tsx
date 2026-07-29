@@ -54,8 +54,14 @@ export default function LoginPage() {
       localStorage.removeItem("remember_member_no");
     }
 
-    message.success("로그인되었습니다.");
-    router.push("/");
+    // 💡 4. 초기 비밀번호('000000') 체크 로직
+    if (values.password === "000000") {
+      message.warning("최초 로그인입니다. 보안을 위해 비밀번호를 변경해 주세요.");
+      router.push("/update-password");
+    } else {
+      message.success("로그인되었습니다.");
+      router.push("/");
+    }
   };
 
   return (
