@@ -9,7 +9,7 @@ import {
 } from "antd";
 import { 
   TrophyOutlined, EditOutlined, PlusOutlined, CheckCircleFilled, CloseCircleOutlined, 
-  BarChartOutlined, CalendarOutlined, InfoCircleOutlined 
+  BarChartOutlined, CalendarOutlined, InfoCircleOutlined, CrownOutlined, WarningOutlined 
 } from "@ant-design/icons";
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line, LabelList 
@@ -18,6 +18,8 @@ import dayjs from "dayjs";
 import 'dayjs/locale/ko';
 import weekOfYear from "dayjs/plugin/weekOfYear";
 import koKR from 'antd/locale/ko_KR';
+
+// 💡 상수를 외부 파일에서 불러옵니다.
 import { ACTIVITY_TOOLS, REGION_MAP } from "@/constants";
 
 dayjs.extend(weekOfYear);
@@ -25,7 +27,6 @@ dayjs.locale('ko');
 
 const { Title, Text } = Typography;
 const { TextArea } = Input;
-
 const MINT_COLOR = "#13c2c2"; 
 
 export default function DashboardPage() {
@@ -47,12 +48,23 @@ export default function DashboardPage() {
 
   const [statsRange, setStatsRange] = useState<[dayjs.Dayjs, dayjs.Dayjs]>([dayjs().startOf('year'), dayjs()]);
 
+  const [rankScope, setRankScope] = useState<string>("region"); 
+  const [timeRanking, setTimeRanking] = useState<any[]>([]);
+  const [resultRanking, setResultRanking] = useState<any[]>([]);
+  const [rankLoading, setRankLoading] = useState(false);
+
   const [form] = Form.useForm();
   const [profileForm] = Form.useForm();
 
   useEffect(() => {
     fetchUserData();
   }, []);
+
+  useEffect(() => {
+    if (member) {
+      fetchLeaderboardData();
+    }
+  }, [member, rankScope, statsRange]);
 
   const fetchUserData = async () => {
     setLoading(true);
@@ -80,6 +92,67 @@ export default function DashboardPage() {
     setLoading(false);
   };
 
+  const fetchLeaderboardData = async () => {
+    setRankLoading(true);
+    try {
+      let mQuery = supabase.from("members").select("id, name, member_no, department, region, team, sector, dept_24, center_church");
+
+      if (rankScope === "region") {
+        mQuery = mQuery.eq("department", member.department).eq("region", member.region);
+      } else if (rankScope === "team") {
+        mQuery = mQuery.eq("department", member.department).eq("region", member.region).eq("team", member.team);
+      } else if (rankScope === "sector") {
+        mQuery = mQuery.eq("department", member.department).eq("region", member.region).eq("team", member.team).eq("sector", member.sector);
+      } else if (rankScope === "dept24" && (member.dept_24 || member.department_24)) {
+        mQuery = mQuery.eq("dept_24", member.dept_24 || member.department_24);
+      } else if (rankScope === "center" && (member.center_church || member.center)) {
+        mQuery = mQuery.eq("center_church", member.center_church || member.center);
+      }
+
+      const { data: groupMembers } = await mQuery;
+      if (!groupMembers || groupMembers.length === 0) {
+        setTimeRanking([]); setResultRanking([]); setRankLoading(false); return;
+      }
+
+      const memberIds = groupMembers.map(m => m.id);
+      const startDateStr = statsRange[0].format("YYYY-MM-DD");
+      const endDateStr = statsRange[1].format("YYYY-MM-DD");
+
+      const { data: groupLogs } = await supabase.from("activity_logs")
+        .select("member_id, start_time, end_time, find_1_count, find_2_count")
+        .in("member_id", memberIds)
+        .gte("activity_date", startDateStr)
+        .lte("activity_date", endDateStr);
+
+      const statsMap: Record<string, { mins: number; score: number }> = {};
+      memberIds.forEach(id => { statsMap[id] = { mins: 0, score: 0 }; });
+
+      (groupLogs || []).forEach(log => {
+        const mId = log.member_id;
+        if (statsMap[mId]) {
+          const durationMins = Math.round(getDurationHours(log.start_time, log.end_time) * 60);
+          const f1 = log.find_1_count || 0;
+          const f2 = log.find_2_count || 0;
+          statsMap[mId].mins += durationMins;
+          statsMap[mId].score += (f1 * 0.5) + (f2 * 1.0);
+        }
+      });
+
+      const combined = groupMembers.map(m => ({
+        id: m.id, name: m.name, member_no: m.member_no,
+        mins: statsMap[m.id]?.mins || 0, score: statsMap[m.id]?.score || 0,
+        isMe: m.id === member.id
+      }));
+
+      setTimeRanking([...combined].sort((a, b) => b.mins - a.mins));
+      setResultRanking([...combined].sort((a, b) => b.score - a.score));
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setRankLoading(false);
+    }
+  };
+
   const handleLogout = async () => {
     await supabase.auth.signOut();
     router.push("/login");
@@ -95,12 +168,8 @@ export default function DashboardPage() {
     setIsEditMode(false);
     setCurrentEditId(null);
     form.setFieldsValue({
-      activity_date: dayjs(),
-      time_range: [dayjs().subtract(1, 'hour'), dayjs()],
-      tool_used: undefined,
-      find_1_count: 0,
-      find_2_count: 0,
-      description: ""
+      activity_date: dayjs(), time_range: [dayjs().subtract(1, 'hour'), dayjs()],
+      tool_used: undefined, find_1_count: 0, find_2_count: 0, description: ""
     });
     setIsReportModalOpen(true);
   };
@@ -111,10 +180,7 @@ export default function DashboardPage() {
     form.setFieldsValue({
       activity_date: dayjs(log.activity_date),
       time_range: [dayjs(`${log.activity_date} ${log.start_time}`), dayjs(`${log.activity_date} ${log.end_time}`)],
-      tool_used: log.tool_used,
-      find_1_count: log.find_1_count,
-      find_2_count: log.find_2_count,
-      description: log.description
+      tool_used: log.tool_used, find_1_count: log.find_1_count, find_2_count: log.find_2_count, description: log.description
     });
     setIsDetailModalOpen(false); 
     setIsReportModalOpen(true);  
@@ -123,10 +189,15 @@ export default function DashboardPage() {
   const handleDeleteLog = async (logId: string) => {
     const { error } = await supabase.from('activity_logs').delete().eq('id', logId);
     if (error) message.error("삭제에 실패했습니다.");
-    else {
-      message.success("활동 기록이 삭제되었습니다.");
-      fetchActivityLogs(member.id);
-    }
+    else { message.success("활동 기록이 삭제되었습니다."); fetchActivityLogs(member.id); }
+  };
+
+  const getTeamSectorString = () => {
+    const t = member?.team;
+    const s = member?.sector;
+    if (t && t !== '-' && s) return `${t}-${s}`;
+    if (!t && s) return `${s}구역`;
+    return "";
   };
 
   const handleReportSubmit = async (values: any) => {
@@ -142,24 +213,26 @@ export default function DashboardPage() {
       return (newStart < existingEnd) && (newEnd > existingStart);
     });
 
-    if (isOverlapping) {
-      message.error("해당 날짜와 겹치는 활동 시간이 이미 보고되어 있습니다.");
-      return;
-    }
+    if (isOverlapping) { message.error("해당 날짜와 겹치는 활동 시간이 이미 보고되어 있습니다."); return; }
 
-    const payload = {
+    const basePayload = {
       member_id: member.id, activity_date: dateStr, start_time: newStart, end_time: newEnd,
       tool_used: values.tool_used, find_1_count: values.find_1_count || 0, find_2_count: values.find_2_count || 0, description: values.description
     };
 
     if (isEditMode) {
-      const { error } = await supabase.from("activity_logs").update(payload).eq("id", currentEditId);
+      const { error } = await supabase.from("activity_logs").update(basePayload).eq("id", currentEditId);
       if (error) message.error("수정에 실패했습니다.");
-      else { message.success("활동이 성공적으로 수정되었습니다!"); setIsReportModalOpen(false); fetchActivityLogs(member.id); }
+      else { message.success("활동이 수정되었습니다!"); setIsReportModalOpen(false); fetchActivityLogs(member.id); }
     } else {
-      const { error } = await supabase.from("activity_logs").insert([payload]);
+      const insertPayload = {
+        ...basePayload, dept_snapshot: member?.department || "미배정", region_snapshot: member?.region || "-",
+        team_snapshot: member?.team || "-", sector_snapshot: member?.sector || "-"
+      };
+      
+      const { error } = await supabase.from("activity_logs").insert([insertPayload]);
       if (error) message.error("보고에 실패했습니다.");
-      else { message.success("활동이 성공적으로 보고되었습니다!"); setIsReportModalOpen(false); fetchActivityLogs(member.id); }
+      else { message.success("활동이 보고되었습니다!"); setIsReportModalOpen(false); fetchActivityLogs(member.id); }
     }
   };
 
@@ -174,6 +247,7 @@ export default function DashboardPage() {
   };
 
   const getDurationHours = (start: string, end: string) => {
+    if (!start || !end) return 0;
     const [sH, sM] = start.split(':').map(Number);
     const [eH, eM] = end.split(':').map(Number);
     let diffMins = (eH * 60 + eM) - (sH * 60 + sM);
@@ -183,14 +257,12 @@ export default function DashboardPage() {
 
   const formatMinsToString = (mins: number) => {
     if (mins === 0) return '0분';
-    const h = Math.floor(mins / 60);
-    const m = mins % 60;
+    const h = Math.floor(mins / 60); const m = mins % 60;
     if (h > 0 && m > 0) return `${h}시간 ${m}분`;
     if (h > 0) return `${h}시간`;
     return `${m}분`;
   };
 
-  // 💡 달력 모바일 최적화: 도구 이름 숨기고 '1h', '30m' 시간만 작은 뱃지로 깔끔하게 표시
   const dateCellRender = (value: dayjs.Dayjs) => {
     const dateString = value.format("YYYY-MM-DD");
     const dayLogs = logs.filter(log => log.activity_date === dateString);
@@ -200,19 +272,11 @@ export default function DashboardPage() {
       <ul style={{ listStyle: "none", padding: 0, margin: 0, textAlign: 'center' }}>
         {dayLogs.map((log, index) => {
           const durationHrs = getDurationHours(log.start_time, log.end_time);
-          let durationStr = "";
-          if (durationHrs >= 1) {
-            durationStr = Number.isInteger(durationHrs) ? `${durationHrs}h` : `${durationHrs.toFixed(1)}h`;
-          } else {
-            durationStr = `${Math.round(durationHrs * 60)}m`;
-          }
+          let durationStr = durationHrs >= 1 ? (Number.isInteger(durationHrs) ? `${durationHrs}h` : `${durationHrs.toFixed(1)}h`) : `${Math.round(durationHrs * 60)}m`;
           
           return (
             <li key={index} style={{ marginBottom: 2 }}>
-              <Badge 
-                color={MINT_COLOR} 
-                text={<span style={{ fontSize: '10px', fontWeight: 'bold' }}>{durationStr}</span>} 
-              />
+              <Badge color={MINT_COLOR} text={<span style={{ fontSize: '10px', fontWeight: 'bold' }}>{durationStr}</span>} />
             </li>
           );
         })}
@@ -257,7 +321,6 @@ export default function DashboardPage() {
 
   const calculateStats = () => {
     let totalMins = 0, totalFind1 = 0, totalFind2 = 0;
-    
     const filteredLogs = logs.filter(log => {
       const logDate = dayjs(log.activity_date);
       return logDate.isAfter(statsRange[0].subtract(1, 'day')) && logDate.isBefore(statsRange[1].add(1, 'day'));
@@ -272,8 +335,7 @@ export default function DashboardPage() {
     const avgFind1Mins = totalFind1 > 0 ? Math.round(totalMins / totalFind1) : 0;
     const avgFind2Mins = totalFind2 > 0 ? Math.round(totalMins / totalFind2) : 0;
 
-    const today = dayjs();
-    const diff = today.day() === 0 ? 6 : today.day() - 1;
+    const today = dayjs(); const diff = today.day() === 0 ? 6 : today.day() - 1;
     const monday = today.subtract(diff, 'day');
     const thisWeekLogs = logs.filter(log => dayjs(log.activity_date).isAfter(monday.subtract(1, 'day')) && dayjs(log.activity_date).isBefore(monday.add(7, 'day')));
     
@@ -285,14 +347,6 @@ export default function DashboardPage() {
     });
 
     return { totalMins, totalFind1, totalFind2, avgFind1Mins, avgFind2Mins, weeklyMins, weeklyFind1, weeklyFind2 };
-  };
-
-  const getTeamSectorString = () => {
-    const t = member?.team;
-    const s = member?.sector;
-    if (t && s) return `${t}-${s}`;
-    if (!t && s) return `${s}구역`;
-    return "";
   };
 
   if (loading) return <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}><Spin size="large" /></div>;
@@ -310,6 +364,58 @@ export default function DashboardPage() {
     const { x, y, value } = props;
     if (!value || value === 0) return null;
     return <text x={x} y={y - 15} fill="#666" textAnchor="middle" fontSize={13}>{value}h</text>;
+  };
+
+  const renderRankList = (rankingList: any[], type: 'time' | 'result') => {
+    if (rankingList.length === 0) return <Text type="secondary" style={{ display: 'block', textAlign: 'center', padding: '20px 0' }}>데이터가 없습니다.</Text>;
+
+    const totalCount = rankingList.length;
+
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+        {rankingList.map((item, idx) => {
+          const rank = idx + 1;
+          const isTop3 = rank <= 3;
+          const isBottom3 = totalCount >= 5 && rank > totalCount - 3; 
+
+          let badgeIcon = <Text style={{ fontSize: '0.85rem', width: 20, textAlign: 'center', fontWeight: 'bold' }}>{rank}</Text>;
+          
+          // 💡 에러 원인이었던 justify를 justifyContent로 수정 완료!
+          let itemStyle: React.CSSProperties = {
+            padding: '6px 10px',
+            borderRadius: '8px',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            backgroundColor: item.isMe ? '#e6fffb' : '#fafafa',
+            border: item.isMe ? `1px solid ${MINT_COLOR}` : '1px solid #f0f0f0'
+          };
+
+          if (isTop3) {
+            if (rank === 1) badgeIcon = <span className="flashy-medal-gold" style={{ fontSize: '1.1rem' }}>🥇</span>;
+            if (rank === 2) badgeIcon = <span className="flashy-medal-silver" style={{ fontSize: '1.1rem' }}>🥈</span>;
+            if (rank === 3) badgeIcon = <span className="flashy-medal-bronze" style={{ fontSize: '1.1rem' }}>🥉</span>;
+          } else if (isBottom3) {
+            itemStyle = { ...itemStyle, backgroundColor: '#fff1f0', border: '1px solid #ffa39e' };
+            badgeIcon = <WarningOutlined style={{ color: '#f5222d', fontSize: '0.85rem' }} />;
+          }
+
+          return (
+            <div key={item.id} style={itemStyle}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span style={{ width: 22, textAlign: 'center', display: 'inline-block' }}>{badgeIcon}</span>
+                <Text strong={item.isMe} style={{ fontSize: '0.85rem', color: item.isMe ? MINT_COLOR : '#262626' }}>
+                  {item.name} {item.isMe && <Text type="secondary" style={{ fontSize: '0.75rem' }}>(나)</Text>}
+                </Text>
+              </div>
+              <Text strong style={{ fontSize: '0.85rem', color: isBottom3 ? '#cf1322' : '#595959' }}>
+                {type === 'time' ? formatMinsToString(item.mins) : `${item.score.toFixed(1)}점`}
+              </Text>
+            </div>
+          );
+        })}
+      </div>
+    );
   };
 
   const tabItems = [
@@ -354,12 +460,10 @@ export default function DashboardPage() {
     },
     { 
       key: "2", label: <><CalendarOutlined /> 달력</>, children: (
-        // 💡 좌우 스크롤 제거 (overflow 및 minWidth 삭제)
         <div style={{ marginTop: 10 }}>
           <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 10 }}>
             <Button size="small" type="primary" onClick={() => setCalendarValue(dayjs())}>오늘로 이동</Button>
           </div>
-          {/* 달력 컴포넌트를 그냥 배치하면 CSS에 의해 모바일 폭에 딱 맞춰집니다 */}
           <Calendar value={calendarValue} onSelect={onCalendarSelect} cellRender={dateCellRender} />
           <Text type="secondary" style={{ display: 'block', marginTop: 10, textAlign: 'center', fontSize: '0.85rem' }}>💡 날짜 칸을 터치하면 상세 내용을 봅니다.</Text>
         </div>
@@ -373,31 +477,29 @@ export default function DashboardPage() {
         
         <div className="side-banner" style={{ width: 160, padding: '20px 10px', display: 'none', position: 'sticky', top: 0, height: '100vh' }}>
           <div style={{ width: '100%', height: 600, backgroundColor: '#e6fffb', borderRadius: 8, border: `1px dashed ${MINT_COLOR}`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', textAlign: 'center' }}>
-            <img src="resources/left_banner.png" width="100%"/>
-            {/* <Text style={{ color: MINT_COLOR, fontWeight: 'bold' }}>좌측 긴 배너<br/>(160 x 600)</Text> */}
+            <Text style={{ color: MINT_COLOR, fontWeight: 'bold' }}>좌측 긴 배너<br/>(160 x 600)</Text>
           </div>
         </div>
 
         <div style={{ width: '100%', maxWidth: 600, padding: '12px', display: 'flex', flexDirection: 'column' }}>
           
-          {/* 💡 달력 모바일 최적화를 위한 CSS 주입 (모드 전환 버튼 숨기기, 패딩 축소 등) */}
           <style dangerouslySetInnerHTML={{__html: `
-            @keyframes bounceAndShineGold { 0%, 100% { transform: translateY(0) scale(1); text-shadow: 0 0 10px rgba(250, 219, 20, 0.5); } 50% { transform: translateY(-5px) scale(1.05); text-shadow: 0 0 20px rgba(250, 219, 20, 1), 0 0 10px rgba(255, 255, 255, 0.8); } }
-            @keyframes shineSilver { 0%, 100% { transform: scale(1); text-shadow: 0 0 5px rgba(211, 211, 211, 0.5); } 50% { transform: scale(1.03); text-shadow: 0 0 15px rgba(211, 211, 211, 1), 0 0 10px rgba(255, 255, 255, 0.8); } }
-            @keyframes shineBronze { 0%, 100% { transform: scale(1); text-shadow: 0 0 5px rgba(212, 136, 6, 0.5); } 50% { transform: scale(1.03); text-shadow: 0 0 10px rgba(212, 136, 6, 1); } }
-            .flashy-medal-gold { animation: bounceAndShineGold 1.5s infinite ease-in-out; } .flashy-medal-silver { animation: shineSilver 2s infinite ease-in-out; } .flashy-medal-bronze { animation: shineBronze 2s infinite ease-in-out; }
+            @keyframes bounceAndShineGold { 0%, 100% { transform: translateY(0) scale(1); filter: drop-shadow(0 0 6px rgba(250, 219, 20, 0.8)); } 50% { transform: translateY(-3px) scale(1.1); filter: drop-shadow(0 0 12px rgba(250, 219, 20, 1)); } }
+            @keyframes shineSilver { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.05); } }
+            @keyframes shineBronze { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.05); } }
+            .flashy-medal-gold { animation: bounceAndShineGold 1.5s infinite ease-in-out; display: inline-block; } 
+            .flashy-medal-silver { animation: shineSilver 2s infinite ease-in-out; display: inline-block; } 
+            .flashy-medal-bronze { animation: shineBronze 2s infinite ease-in-out; display: inline-block; }
             @media (min-width: 1000px) { .side-banner { display: flex !important; } }
             .compact-stats .ant-typography { margin-bottom: 2px !important; }
-            
-            /* 달력 모바일 반응형 강제 최적화 */
             .ant-picker-calendar .ant-picker-cell-inner { padding: 4px 0 !important; min-width: 0 !important; }
             .ant-picker-calendar-date-value { font-size: 0.85rem !important; }
-            .ant-picker-calendar-mode-switch { display: none !important; } /* 월/연간 전환 버튼 숨김 */
+            .ant-picker-calendar-mode-switch { display: none !important; } 
             .ant-picker-calendar-header .ant-select { min-width: 70px !important; width: auto !important; margin-right: 4px; }
           `}} />
 
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-            <Title level={4} style={{ margin: 0, color: '#262626' }}>전도 다이어리 📖</Title>
+            <Title level={4} style={{ margin: 0, color: '#262626' }}>나의 전도 다이어리 📖</Title>
             <div style={{ display: 'flex', gap: '6px' }}>
               {member?.is_admin && <Button size="small" type="primary" danger onClick={() => router.push('/admin')}>관리자</Button>}
               <Button size="small" onClick={handleLogout}>로그아웃</Button>
@@ -417,10 +519,39 @@ export default function DashboardPage() {
             <Button type="link" size="small" icon={<EditOutlined />} onClick={() => { profileForm.setFieldsValue({ region: member?.region, team: member?.team, sector: member?.sector }); setIsProfileModalOpen(true); }} style={{ padding: 0, color: MINT_COLOR }}>수정</Button>
           </div>
 
-          <div style={{ width: '100%', minHeight: 60, backgroundColor: '#e6fffb', borderRadius: 8, marginBottom: 16, display: 'flex', alignItems: 'center', justifyContent: 'center', border: `1px dashed ${MINT_COLOR}` }}>
-            {/*<Text style={{ color: MINT_COLOR, fontSize: '0.9rem' }}>상단 배너 공간</Text>*/}
-            <img src="resources/top_banner.png" width="100%" height="100%"/>
-          </div>
+          <Card styles={{ body: { padding: '12px 14px' } }} style={{ marginBottom: 16, borderRadius: 12, boxShadow: "0 4px 12px rgba(0,0,0,0.05)", border: `1px solid #e6fffb` }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <CrownOutlined style={{ color: '#fadb14', fontSize: '1.2rem' }} />
+                <Text strong style={{ fontSize: '0.95rem', color: '#262626' }}>전도 순위표</Text>
+              </div>
+              <Select value={rankScope} onChange={setRankScope} size="small" style={{ width: 110 }}>
+                <Select.Option value="region">내 지역</Select.Option>
+                <Select.Option value="team">내 팀</Select.Option>
+                <Select.Option value="sector">내 구역</Select.Option>
+                {(member?.dept_24 || member?.department_24) && <Select.Option value="dept24">24부서</Select.Option>}
+                {(member?.center_church || member?.center) && <Select.Option value="center">센터</Select.Option>}
+              </Select>
+            </div>
+            {rankLoading ? (
+              <div style={{ textAlign: 'center', padding: '20px 0' }}><Spin size="small" /></div>
+            ) : (
+              <Row gutter={8}>
+                <Col span={12}>
+                  <div style={{ backgroundColor: '#fff', padding: '8px', borderRadius: '8px', border: '1px solid #f0f0f0' }}>
+                    <Text strong style={{ display: 'block', textAlign: 'center', fontSize: '0.8rem', color: MINT_COLOR, marginBottom: 6 }}>⏱️ 활동시간 순위</Text>
+                    {renderRankList(timeRanking, 'time')}
+                  </div>
+                </Col>
+                <Col span={12}>
+                  <div style={{ backgroundColor: '#fff', padding: '8px', borderRadius: '8px', border: '1px solid #f0f0f0' }}>
+                    <Text strong style={{ display: 'block', textAlign: 'center', fontSize: '0.8rem', color: MINT_COLOR, marginBottom: 6 }}>🎯 활동결과 순위</Text>
+                    {renderRankList(resultRanking, 'result')}
+                  </div>
+                </Col>
+              </Row>
+            )}
+          </Card>
 
           <Card styles={{ body: { padding: '16px' } }} style={{ marginBottom: 16, borderRadius: 12, boxShadow: "0 2px 8px rgba(0,0,0,0.05)", border: `1px solid #e6fffb` }}>
             <div className="compact-stats">
@@ -434,10 +565,7 @@ export default function DashboardPage() {
               <DatePicker.RangePicker 
                 value={statsRange} 
                 onChange={(dates) => { if(dates && dates[0] && dates[1]) setStatsRange([dates[0], dates[1]]) }}
-                style={{ width: '100%', marginBottom: 12 }}
-                size="small"
-                allowClear={false}
-                inputReadOnly={true} 
+                style={{ width: '100%', marginBottom: 12 }} size="small" allowClear={false} inputReadOnly={true}
               />
 
               <Row gutter={[0, 4]}>
@@ -445,9 +573,7 @@ export default function DashboardPage() {
                 <Col span={24}><Text type="secondary" style={{ width: 100, display: 'inline-block' }}>총 찾기 수 :</Text> <Text strong>찾1 {stats.totalFind1}명, 찾2 {stats.totalFind2}명</Text></Col>
                 <Col span={24}><Text type="secondary" style={{ width: 100, display: 'inline-block' }}>평균 찾기 시간 :</Text> <Text strong>찾1 {stats.avgFind1Mins ? formatMinsToString(stats.avgFind1Mins) : '없음'}, 찾2 {stats.avgFind2Mins ? formatMinsToString(stats.avgFind2Mins) : '없음'}</Text></Col>
               </Row>
-              
               <Divider style={{ margin: '12px 0' }} />
-              
               <div style={{ display: 'flex', alignItems: 'center', marginBottom: 8 }}>
                 <CalendarOutlined style={{ color: MINT_COLOR, marginRight: 6 }} /> 
                 <Text strong style={{ fontSize: '1rem', color: MINT_COLOR }}>주간 활동 내역 요약</Text>
@@ -461,13 +587,11 @@ export default function DashboardPage() {
 
           <Card styles={{ body: { padding: '16px' } }} style={{ marginBottom: 16, borderRadius: 12, textAlign: "center", boxShadow: "0 4px 12px rgba(0,0,0,0.05)", border: `2px solid ${MINT_COLOR}` }}>
             <Title level={5} style={{ marginTop: 0, marginBottom: 16 }}>주간 활동 스탬프 (이번 주: {activityCount}일)</Title>
-            
             <div style={{ marginBottom: 20 }}>
               <div className={medal.styleClass} style={{ display: 'inline-block', fontSize: '20px', fontWeight: "bold", color: medal.color, padding: '4px 16px', borderRadius: '50px', backgroundColor: activityCount >= 1 ? '#fff' : 'transparent' }}>
                 <TrophyOutlined style={{ marginRight: 6 }} /> {medal.text}
               </div>
             </div>
-
             <Row justify="center" gutter={6}>
               {weekDays.map((day, idx) => {
                 const dateStr = day.format("YYYY-MM-DD");
@@ -482,10 +606,7 @@ export default function DashboardPage() {
                 );
               })}
             </Row>
-            
-            <Button type="primary" size="large" icon={<PlusOutlined />} style={{ marginTop: 24, width: "100%", height: '45px', fontSize: '1.1rem', borderRadius: 25, boxShadow: `0 4px 10px rgba(19, 194, 194, 0.3)` }} onClick={openReportModal}>
-              오늘의 활동 보고하기
-            </Button>
+            <Button type="primary" size="large" icon={<PlusOutlined />} style={{ marginTop: 24, width: "100%", height: '45px', fontSize: '1.1rem', borderRadius: 25, boxShadow: `0 4px 10px rgba(19, 194, 194, 0.3)` }} onClick={openReportModal}>오늘의 활동 보고하기</Button>
           </Card>
 
           <Card styles={{ body: { padding: '12px' } }} style={{ borderRadius: 12, boxShadow: "0 2px 8px rgba(0,0,0,0.05)" }}>
@@ -495,7 +616,6 @@ export default function DashboardPage() {
           <div style={{ width: '100%', minHeight: 80, backgroundColor: '#e6fffb', borderRadius: 8, marginTop: 16, display: 'flex', alignItems: 'center', justifyContent: 'center', border: `1px dashed ${MINT_COLOR}` }}>
             <Text style={{ color: MINT_COLOR, fontSize: '0.9rem' }}>하단 배너 공간</Text>
           </div>
-
         </div>
 
         <div className="side-banner" style={{ width: 160, padding: '20px 10px', display: 'none', position: 'sticky', top: 0, height: '100vh' }}>
@@ -503,7 +623,6 @@ export default function DashboardPage() {
             <Text style={{ color: MINT_COLOR, fontWeight: 'bold' }}>우측 긴 배너<br/>(160 x 600)</Text>
           </div>
         </div>
-
       </div>
 
       <Modal title={<Title level={5} style={{margin:0}}>{calendarValue.format("M월 D일")} 활동 상세</Title>} open={isDetailModalOpen} onCancel={() => setIsDetailModalOpen(false)} footer={null} styles={{ body: { padding: '16px 12px' } }}>
@@ -514,49 +633,33 @@ export default function DashboardPage() {
                 <Text strong style={{ fontSize: '1.05rem' }}>{log.tool_used}</Text>
                 <Text type="secondary" style={{ marginLeft: 6, fontSize: '0.9rem' }}>({log.start_time.slice(0,5)} ~ {log.end_time.slice(0,5)})</Text>
               </div>
-              <div style={{ marginBottom: 8 }}>
-                <Badge status="processing" color={MINT_COLOR} text={<span style={{fontSize:'0.9rem'}}>찾1: {log.find_1_count}명 / 찾2: {log.find_2_count}명</span>} />
-              </div>
-              <div style={{ padding: 10, backgroundColor: '#fff', borderRadius: 6, border: '1px solid #f0f0f0', fontSize: '0.9rem' }}>
-                <Text>{log.description || "상세 내역이 없습니다."}</Text>
-              </div>
+              <div style={{ marginBottom: 8 }}><Badge status="processing" color={MINT_COLOR} text={<span style={{fontSize:'0.9rem'}}>찾1: {log.find_1_count}명 / 찾2: {log.find_2_count}명</span>} /></div>
+              <div style={{ padding: 10, backgroundColor: '#fff', borderRadius: 6, border: '1px solid #f0f0f0', fontSize: '0.9rem' }}><Text>{log.description || "상세 내역이 없습니다."}</Text></div>
               <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 12, gap: '6px' }}>
                 <Button size="small" icon={<EditOutlined />} onClick={() => openEditModal(log)}>수정</Button>
-                <Popconfirm title="삭제하시겠습니까?" onConfirm={() => handleDeleteLog(log.id)} okText="삭제" cancelText="취소">
-                  <Button size="small" danger>삭제</Button>
-                </Popconfirm>
+                <Popconfirm title="삭제하시겠습니까?" onConfirm={() => handleDeleteLog(log.id)} okText="삭제" cancelText="취소"><Button size="small" danger>삭제</Button></Popconfirm>
               </div>
             </Card>
           ))
         ) : (
           <div style={{ textAlign: 'center', padding: '30px 0' }}>
             <Text type="secondary">보고된 활동이 없습니다.</Text>
-            <Button type="primary" size="small" style={{ display: 'block', margin: '16px auto 0' }} onClick={() => { setIsDetailModalOpen(false); openReportModal(); }}>
-              새 활동 보고하기
-            </Button>
+            <Button type="primary" size="small" style={{ display: 'block', margin: '16px auto 0' }} onClick={() => { setIsDetailModalOpen(false); openReportModal(); }}>새 활동 보고하기</Button>
           </div>
         )}
       </Modal>
 
       <Modal title={<Title level={4} style={{margin:0}}>{isEditMode ? "활동 내용 수정" : "나의 활동 보고"}</Title>} open={isReportModalOpen} onCancel={() => setIsReportModalOpen(false)} footer={null} styles={{ body: { padding: '16px 12px' } }}>
         <Form form={form} layout="vertical" onFinish={handleReportSubmit} size="middle" style={{ marginTop: 16 }}>
-          <Form.Item name="activity_date" label="활동 날짜" rules={[{ required: true, message: "선택 필수" }]} style={{ marginBottom: 12 }}>
-            <DatePicker style={{ width: "100%" }} disabledDate={disabledDate} />
-          </Form.Item>
-          <Form.Item name="time_range" label="시작/종료 시간" rules={[{ required: true, message: "선택 필수" }]} style={{ marginBottom: 12 }}>
-            <TimePicker.RangePicker format="HH:mm" minuteStep={30} needConfirm={false} style={{ width: "100%" }} />
-          </Form.Item>
-          <Form.Item name="tool_used" label="활동 도구" rules={[{ required: true, message: "선택 필수" }]} style={{ marginBottom: 12 }}>
-            <Select placeholder="도구 선택">{ACTIVITY_TOOLS.map((tool) => (<Select.Option key={tool} value={tool}>{tool}</Select.Option>))}</Select>
-          </Form.Item>
+          <Form.Item name="activity_date" label="활동 날짜" rules={[{ required: true, message: "선택 필수" }]} style={{ marginBottom: 12 }}><DatePicker style={{ width: "100%" }} disabledDate={disabledDate} /></Form.Item>
+          <Form.Item name="time_range" label="시작/종료 시간" rules={[{ required: true, message: "선택 필수" }]} style={{ marginBottom: 12 }}><TimePicker.RangePicker format="HH:mm" minuteStep={30} needConfirm={false} style={{ width: "100%" }} /></Form.Item>
+          <Form.Item name="tool_used" label="활동 도구" rules={[{ required: true, message: "선택 필수" }]} style={{ marginBottom: 12 }}><Select placeholder="도구 선택">{ACTIVITY_TOOLS.map((tool) => (<Select.Option key={tool} value={tool}>{tool}</Select.Option>))}</Select></Form.Item>
           <Row gutter={12}>
             <Col span={12}><Form.Item name="find_1_count" label="찾1 (명)" initialValue={0} style={{ marginBottom: 12 }}><Input type="number" min={0} /></Form.Item></Col>
             <Col span={12}><Form.Item name="find_2_count" label="찾2 (명)" initialValue={0} style={{ marginBottom: 12 }}><Input type="number" min={0} /></Form.Item></Col>
           </Row>
           <Form.Item name="description" label="활동 내역 (선택)" style={{ marginBottom: 16 }}><TextArea rows={3} maxLength={500} placeholder="내역이나 소감을 적어주세요." /></Form.Item>
-          <Form.Item style={{ marginBottom: 0 }}>
-            <Button type="primary" htmlType="submit" block size="large" style={{ borderRadius: 8 }}>{isEditMode ? "수정 내용 저장" : "보고서 제출하기"}</Button>
-          </Form.Item>
+          <Form.Item style={{ marginBottom: 0 }}><Button type="primary" htmlType="submit" block size="large" style={{ borderRadius: 8 }}>{isEditMode ? "수정 내용 저장" : "보고서 제출하기"}</Button></Form.Item>
         </Form>
       </Modal>
 
@@ -564,7 +667,7 @@ export default function DashboardPage() {
         <Form form={profileForm} layout="vertical" onFinish={handleProfileUpdate} size="middle" style={{ marginTop: 12 }}>
           <Form.Item name="region" label="지역 선택" style={{ marginBottom: 12 }}>
             <Select placeholder="지역을 선택해 주세요">
-              {(REGION_MAP[member?.department || "미배정"] || []).map(region => (<Select.Option key={region} value={region}>{region}</Select.Option>))}
+              {(REGION_MAP[member?.department || "미배정"] || []).map((region: string) => (<Select.Option key={region} value={region}>{region}</Select.Option>))}
             </Select>
           </Form.Item>
           <Form.Item name="team" label="팀" style={{ marginBottom: 12 }}><Input placeholder="예: 1팀" /></Form.Item>
