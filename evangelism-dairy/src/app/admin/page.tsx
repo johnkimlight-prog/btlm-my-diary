@@ -62,11 +62,11 @@ export default function AdminPage() {
   };
 
   const formatMinsToString = (mins: number) => {
-    if (!mins || mins === 0) return '0분';
+    if (!mins || mins === 0) return '0m';
     const h = Math.floor(mins / 60); const m = mins % 60;
-    if (h > 0 && m > 0) return `${h}시간 ${m}분`;
-    if (h > 0) return `${h}시간`;
-    return `${m}분`;
+    if (h > 0 && m > 0) return `${h}h ${m}m`;
+    if (h > 0) return `${h}h`;
+    return `${m}m`;
   };
 
   const fetchAllMembersCountBypass = async () => {
@@ -236,13 +236,30 @@ export default function AdminPage() {
     reader.readAsArrayBuffer(file); return false; 
   };
 
+// 💡 [수정됨] 활동자 수 집계 및 찾기 점수 통합
   const calculateTotalStats = () => {
-    let totalMins = 0, totalFind1 = 0, totalFind2 = 0;
+    let totalMins = 0;
+    let totalFindScore = 0;
+    const uniqueMembers = new Set(); // UUID 중복 제거용 집합
+
     logs.forEach(log => {
       totalMins += Math.round(getDurationHours(log.start_time, log.end_time) * 60);
-      totalFind1 += (log.find_1_count || 0); totalFind2 += (log.find_2_count || 0);
+      
+      const f1 = log.find_1_count || 0;
+      const f2 = log.find_2_count || 0;
+      totalFindScore += (f1 * 0.5) + (f2 * 1.0); // 통합 점수 계산
+      
+      if (log.member_id) {
+        uniqueMembers.add(log.member_id); // 활동자 UUID 수집
+      }
     });
-    return { totalMins, totalFind1, totalFind2, logCount: logs.length };
+
+    return { 
+      totalMins, 
+      totalFindScore, 
+      logCount: logs.length, 
+      activeMemberCount: uniqueMembers.size // 고유 활동자 수 반환
+    };
   };
 
   const generateChartData = () => {
@@ -329,12 +346,12 @@ export default function AdminPage() {
                     </Row>
                   </Card>
 
-                  {/* 💡 Statistic 태그의 valueStyle 에러 수정 완료 */}
+                  {/* 💡 [수정됨] 보고 건수 -> 활동자 수 -> 총 활동 시간 -> 총 찾기(점수) 배치 */}
                   <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
                     <Col xs={12} md={6}><Card styles={{ body: { padding: '20px' } }} style={{ borderRadius: 12 }}><Statistic title="총 보고 건수" value={stats.logCount} suffix="건" styles={{ content: { color: MINT_COLOR, fontWeight: 'bold' } }} /></Card></Col>
+                    <Col xs={12} md={6}><Card styles={{ body: { padding: '20px' } }} style={{ borderRadius: 12 }}><Statistic title="활동자 수" value={stats.activeMemberCount} suffix="명" styles={{ content: { color: MINT_COLOR, fontWeight: 'bold' } }} /></Card></Col>
                     <Col xs={12} md={6}><Card styles={{ body: { padding: '20px' } }} style={{ borderRadius: 12 }}><Statistic title="총 활동 시간" value={formatMinsToString(stats.totalMins)} styles={{ content: { color: MINT_COLOR, fontWeight: 'bold' } }} /></Card></Col>
-                    <Col xs={12} md={6}><Card styles={{ body: { padding: '20px' } }} style={{ borderRadius: 12 }}><Statistic title="총 찾기 1" value={stats.totalFind1} suffix="명" styles={{ content: { color: MINT_COLOR, fontWeight: 'bold' } }} /></Card></Col>
-                    <Col xs={12} md={6}><Card styles={{ body: { padding: '20px' } }} style={{ borderRadius: 12 }}><Statistic title="총 찾기 2" value={stats.totalFind2} suffix="명" styles={{ content: { color: MINT_COLOR, fontWeight: 'bold' } }} /></Card></Col>
+                    <Col xs={12} md={6}><Card styles={{ body: { padding: '20px' } }} style={{ borderRadius: 12 }}><Statistic title="총 찾기 (점수)" value={stats.totalFindScore.toFixed(1)} suffix="점" styles={{ content: { color: MINT_COLOR, fontWeight: 'bold' } }} /></Card></Col>
                   </Row>
 
                   <Card title="부서별 활동 시간 비교 (스냅샷 기준)" styles={{ body: { padding: '24px' } }} style={{ marginBottom: 24, borderRadius: 12 }}>
