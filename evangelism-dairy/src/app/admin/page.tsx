@@ -185,6 +185,7 @@ export default function AdminPage() {
     } catch (err) { message.error("저장 중 오류가 발생했습니다."); }
   };
 
+// 💡 [수정됨] 엑셀 일괄 업로드 (DB 원본 및 한글 양식 동시 지원 + 사명 삭제 방지 안전장치)
   const handleExcelUpload = async (file: File) => {
     setIsUploading(true);
     const reader = new FileReader();
@@ -197,6 +198,10 @@ export default function AdminPage() {
 
         if (rows.length === 0) throw new Error("엑셀에 데이터가 없습니다.");
 
+        // 💡 [핵심 안전장치] 엑셀에 사명(권한) 관련 열이 하나라도 있는지 확인
+        // 이 열이 없다면 DB 원본 추출본으로 간주하고 기존 사명 데이터를 절대 건드리지 않습니다.
+        const hasRoleColumn = rows.some(row => '사명명' in row || 'role_name' in row || '관리자권한' in row);
+
         const { data: allMembers } = await supabase.from('members').select('id, member_no');
         const memberMap: Record<string, string> = {};
         allMembers?.forEach(m => { memberMap[m.member_no] = m.id; });
@@ -206,34 +211,74 @@ export default function AdminPage() {
         const validUserIds: string[] = [];
 
         rows.forEach(row => {
-          const mNo = row['고유번호']?.toString().trim();
+          // 💡 한글 양식('고유번호')과 DB 추출 원본('member_no') 모두 완벽 호환
+          const mNo = (row['고유번호'] || row['member_no'])?.toString().trim();
           if (!mNo || !memberMap[mNo]) return;
+          
           const uuid = memberMap[mNo];
           validUserIds.push(uuid);
 
+          // 소속 정보 페이로드 (한글/영문 매칭)
           membersUpdatePayload.push({
-            id: uuid, member_no: mNo,
-            department: row['소속부서'] || "-", region: row['소속지역'] || "-", team: row['소속팀']?.toString() || "-", sector: row['소속구역']?.toString() || "-",
-            dept_24: row['소속24부서'] || null, center_church: row['소속센터'] || null
+            id: uuid, 
+            member_no: mNo,
+            department: row['소속부서'] || row['department'] || "-",
+            region: row['소속지역'] || row['region'] || "-",
+            team: row['소속팀']?.toString() || row['team']?.toString() || "-",
+            sector: row['소속구역']?.toString() || row['sector']?.toString() || "-",
+            dept_24: row['소속24부서'] || row['dept_24'] || null,
+            center: row['소속센터'] || row['center_church'] || row['center'] || null
           });
 
-          if (row['사명명']) {
-            rolesInsertPayload.push({
-              member_id: uuid, role_name: row['사명명'],
-              target_dept: row['관할부서'] || null, target_region: row['관할지역'] || null, target_team: row['관할팀']?.toString() || null, target_sector: row['관할구역']?.toString() || null,
-              has_admin_access: row['관리자권한'] === 'O'
-            });
+          // 엑셀에 사명 정보가 포함된 경우에만 권한 페이로드 생성
+          if (hasRoleColumn) {
+            const roleName = row['사명명'] || row['role_name'];
+            if (roleName) {
+              rolesInsertPayload.push({
+                member_id: uuid, 
+                role_name: roleName,
+                target_dept: row['관할부서'] || row['target_dept'] || null, 
+                target_region: row['관할지역'] || row['target_region'] || null,
+                target_team: row['관할팀']?.toString() || row['target_team']?.toString() || null, 
+                target_sector: row['관할구역']?.toString() || row['target_sector']?.toString() || null,
+                target_24dept: row['관할24부서']?.toString() || row['target_24dept']?.toString() || null, 
+                target_center: row['관할센터']?.toString() || row['target_center']?.toString() || null,
+                has_admin_access: row['관리자권한'] === 'O' || row['has_admin_access'] === true
+              });
+            }
           }
         });
 
-        await supabase.from('members').upsert(membersUpdatePayload);
-        if (validUserIds.length > 0) await supabase.from('member_roles').delete().in('member_id', validUserIds);
-        if (rolesInsertPayload.length > 0) await supabase.from('member_roles').insert(rolesInsertPayload);
+        // 1. 소속 정보 일괄 업데이트
+        if (membersUpdatePayload.length > 0) {
+          const { error: err1 } = await supabase.from('members').upsert(membersUpdatePayload);
+          if (err1) throw err1;
+        }
 
-        message.success(`${validUserIds.length}명의 정보가 반영되었습니다!`); checkAdminAndFetchData();
-      } catch (err: any) { message.error("오류가 발생했습니다. 양식을 확인해주세요."); } finally { setIsUploading(false); }
+        // 2. 사명 정보 업데이트 (사명 컬럼이 존재하는 엑셀을 업로드했을 때만 안전하게 실행)
+        if (hasRoleColumn && validUserIds.length > 0) {
+          // 기존 사명 초기화
+          const { error: err2 } = await supabase.from('member_roles').delete().in('member_id', validUserIds);
+          if (err2) throw err2;
+          
+          // 새 사명 부여
+          if (rolesInsertPayload.length > 0) {
+            const { error: err3 } = await supabase.from('member_roles').insert(rolesInsertPayload);
+            if (err3) throw err3;
+          }
+        }
+
+        message.success(`총 ${validUserIds.length}명의 정보가 성공적으로 반영되었습니다!`);
+        checkAdminAndFetchData();
+      } catch (err: any) {
+        console.error(err);
+        message.error("오류가 발생했습니다. 양식을 확인해주세요.");
+      } finally {
+        setIsUploading(false);
+      }
     };
-    reader.readAsArrayBuffer(file); return false; 
+    reader.readAsArrayBuffer(file);
+    return false; 
   };
 
 // 💡 [수정됨] 활동자 수 집계 및 찾기 점수 통합
@@ -474,7 +519,7 @@ export default function AdminPage() {
                 </Select>
               </Form.Item>
             </Col>
-            <Col span={12}><Form.Item name="target_region" label="관할 지역"><Input placeholder="예: 장년 1지역" /></Form.Item></Col>
+            <Col span={12}><Form.Item name="target_region" label="관할 지역"><Input placeholder="예: 보라매" /></Form.Item></Col>
             <Col span={12}><Form.Item name="target_team" label="관할 팀"><Input placeholder="예: 1팀" /></Form.Item></Col>
             <Col span={12}><Form.Item name="target_sector" label="관할 구역"><Input placeholder="예: 1구역" /></Form.Item></Col>
           </Row>
